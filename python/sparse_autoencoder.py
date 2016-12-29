@@ -1,5 +1,8 @@
+#!/usr/bin/python
+
 import tensorflow as tf
 import random
+import csv
 
 class SparseNN:
 
@@ -13,6 +16,7 @@ class SparseNN:
 	FULL_CONN_EDGES_DECODER = []
 
 	input = None
+	encoder = None
 	output = None
 	label = None
 
@@ -24,6 +28,8 @@ class SparseNN:
 	sess = None
 	loss = None
 	train_step = None
+
+	mse = None
 
 	def __init__(self, input_width, max_hidden_width):
 		self.INPUT_WIDTH = input_width
@@ -58,7 +64,8 @@ class SparseNN:
 		encoder_weight = SparseNN.__weight_variable([self.MAX_HIDDEN_WIDTH, self.INPUT_WIDTH], encoder_edges)
 		encoder_bias = SparseNN.__bias_variable([self.MAX_HIDDEN_WIDTH, 1])
 		encoder = tf.sparse_tensor_dense_matmul(encoder_weight, input_trans) + encoder_bias
-		encoder = tf.nn.relu(encoder)
+		encoder = tf.nn.sigmoid(encoder)
+		self.encoder = encoder
 
 		# Decoder
 		decoder_weight = SparseNN.__weight_variable([self.INPUT_WIDTH, self.MAX_HIDDEN_WIDTH], decoder_edges)
@@ -89,14 +96,69 @@ class SparseNN:
 		self.train_input = new_train_input
 
 	def train(self):
-		for iter in range(100):
+		self.mse = 999999999.9
+		for iter in range(10000):
 			for i in range(0, len(self.train_input) - self.BATCH_SIZE, self.BATCH_SIZE):
 				self.train_step.run(
 					feed_dict={self.input: self.train_input[i: i + self.BATCH_SIZE]})
-			print self.output.eval(feed_dict={self.input: self.val_input[0:4]})
-			print self.loss.eval(feed_dict={self.input: self.val_input})
+			newMse = self.loss.eval(feed_dict={self.input: self.val_input})
+			print newMse
+			if newMse >= self.mse:
+				break
+
+			self.mse = newMse			
 			self.__shuffle_train_data()
 
+	def getMse(self):
+		return self.mse
+
+	def getCode(self):
+		code = self.encoder.run(feed_dict={self.input: self.train_input})
+		return code.tolist()
+
+if __name__ == '__main__':
+
+	## Read request
+
+	file = open('request', 'r')
+	parameters = file.read().split('\n')
+	data_filename = parameters[0]
+	input_width = int(parameters[1])
+	hidden_width = int(parameters[2])
+	edge_count = int(parameters[3])
+	edges = []
+	for i in range(edge_count):
+		edge = [int(intStr) for intStr in parameters[4 + i].split(' ')]
+		edges.append(edge)
+	
+	saveOrNot = (parameters[4 + edge_count] == '1')
+	if saveOrNot:
+		outputFilename = parameters[5 + edge_count]
+
+	## Read input data
+	inputDataFile = open(data_filename, 'rb')
+	inputData = []
+	csvReader = csv.reader(inputDataFile, delimiter=' ')
+	for row in csvReader:
+		inputData.append(row)
+
+	## Build model
+	sparse_nn = SparseNN(input_width, max_hidden_width=hidden_width)
+	sparse_nn.define_model(edges)
+	sparse_nn.define_data(inputData)
+	sparse_nn.train()
+
+	## Output MSE
+	replyFile = open('reply', 'w')
+	replyFile.write(str(sparse_nn.getMse()))
+
+	## Output data
+	if saveOrNot:
+		code = sparse_nn.getCode()
+		csvWriter = csv.writer(outputFilename, 'wb')
+		csvWriter.write(code)
+	
+'''
 if __name__ == '__main__':
 	## Solve classic XOR problem
 	sparse_nn = SparseNN(2, max_hidden_width=2)
@@ -104,3 +166,4 @@ if __name__ == '__main__':
 	sparse_nn.define_model()
 	sparse_nn.define_data([[0, 0], [0, 1], [1, 0], [1, 1]] * 1000)
 	sparse_nn.train()
+'''
