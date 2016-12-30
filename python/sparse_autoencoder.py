@@ -10,7 +10,7 @@ class SparseNN:
 
 	VAL_SPLIT = 0.1
 	BATCH_SIZE = 128
-	LEARNING_RATE = 0.1
+	LEARNING_RATE = 0.05
 
 	INPUT_WIDTH = 2
 	MAX_HIDDEN_WIDTH = 1
@@ -43,7 +43,7 @@ class SparseNN:
 				self.FULL_CONN_EDGES_ENCODER.append([j, i])
 				self.FULL_CONN_EDGES_DECODER.append([i, j])
 
-		self.sess = tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=8))
+		self.sess = tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=1))
 	
 	@staticmethod
 	def __weight_variable(shape, edges):
@@ -102,10 +102,8 @@ class SparseNN:
 					feed_dict={self.input: self.train_input[[i, i + self.BATCH_SIZE], :]})
 			with self.sess.as_default():
 				newMse = self.loss.eval(feed_dict={self.input: self.val_input})
-			print newMse
 			if newMse >= self.mse:
 				break
-
 			self.mse = newMse			
 			self.__shuffle_train_data()
 
@@ -159,8 +157,6 @@ if __name__ == '__main__':
 	else:
 		sparse_nn.define_model(edges)
 	sparse_nn.define_data(inputData)
-	if saveOrNot:
-		sparse_nn.setLearningRate(0.001)
 	sparse_nn.train()
 
 	## Output MSE

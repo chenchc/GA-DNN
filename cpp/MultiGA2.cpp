@@ -15,7 +15,7 @@ struct sol {
 	double x;//accuracy
 	int y;//cost
 	int part;
-	double crowdingDist;
+	int age;
 	bool isChoose = false;
 	vector<bool>Chromosome;
 };
@@ -23,57 +23,69 @@ struct sol {
 void initial();
 void selection();
 int noneDominate( const sol &, const sol & );
-void noneDominateSort();
-void crowdingDisSort();
-void crossover();
-bool converge();
+void noneDominateSort( void );
+void crowdingDisSort( void );
+void crossover( void );
 double getMSE( int, int );
+void storeBest( int, int );
 
-const int generation = 10;
-const int populationSize = 10;
-const int inputNode = 49;
-const int outputNode = 40;
-const int length = inputNode * outputNode;
-
+const int maxGeneration = 1000;
+int inputNode;
+int outputNode;
+int length;
+int populationSize;
+const int nElder = 3;
+const int elderAge = 5;
 int edgePart;
+int currentNElder = 0;
 MyRand randGenerator;
+char *jobname;
+char *trainDataFilename;
 
-vector<sol> solution( populationSize * 2 );
-double crowdingDisPart[populationSize * 2] = {0};
+vector<sol> solution;
+double *crowdingDisPart;
 vector<int> indexPart;
-int validList[populationSize] = {0};
-int invalidList[populationSize] = {0};
+vector<int> firstList;
+int *validList;
+int *invalidList;
 int validCount;
-int main() {
-	int i, j, k;
-	char name[20] = "mnist.csv";
+int curentGeneration = 0;
+
+int main(int argc, char **argv) {
+	if (argc != 5) {
+		cerr << "Wrong parameters" << endl;
+	}
+
+	inputNode = atoi(argv[1]);
+	outputNode = atoi(argv[2]);
+	length = inputNode * outputNode;
+	populationSize = (int)(length * log(length) / 64) / 2 * 2;
+	jobname = argv[3];
+	trainDataFilename = argv[4];
+	crowdingDisPart = new double[populationSize * 2]{0.0};
+	validList = new int[populationSize]{0};
+	invalidList = new int[populationSize]{0};
+	solution = vector<sol>(2 * populationSize);
+
+	omp_set_num_threads(8);
+
+	int i, j;
 	FILE *fp = fopen( "spec", "w" );
 
-	printf( "%s\n%d\n%d\n", name, inputNode, outputNode );
-	fprintf( fp, "%s\n%d\n%d\n", name, inputNode, outputNode );
+	printf( "%s\n%d\n%d\n", trainDataFilename, inputNode, outputNode );
+	fprintf( fp, "%s\n%d\n%d\n", trainDataFilename, inputNode, outputNode );
 	fclose( fp );
 
 	initial();
-
-	i = 0;
-	while ( i < generation ) {
+	while ( currentNElder < nElder && curentGeneration < maxGeneration ) {
 		crossover();
 		//getMSE();
 		selection();
-		i++;
-		/*for ( j = 0; j < populationSize; j++ ) {
-			printf( "%d ", solution[j].part );
+		for ( i = 0; i < populationSize; i++ ) {
+			printf( "%d-%lf,%d,%d ", solution[validList[i]].part, solution[validList[i]].x, solution[validList[i]].y, solution[validList[i]].age );
 		}
-		printf( "\n" );*/
-		k = 0;
-		for ( j = 0; j < populationSize; j++ ) {
-			printf( "%d-%lf,%d ", solution[validList[j]].part, solution[validList[j]].x, solution[validList[j]].y );
-			if ( solution[validList[j]].part == 1 ) {
-				k++;
-			}
-		}
-		printf( "\ngenration %d\nnum of first = %d\n\n", i, k );
-		//converge();
+		curentGeneration++;
+		printf( "\ngenration %d\nnum of first = %d\n\n", curentGeneration, indexPart.size() );
 	}
 
 	/*
@@ -96,11 +108,13 @@ void initial() {
 	int i = 0, j, weight = 0, cost = 0;
 
 	for ( i = 0; i <populationSize; i++ ) {
+		solution[i].age = 0;
+		solution[i + populationSize].age = 0;
 		validList[i] = i;
 		invalidList[i] = i + populationSize;
 		for ( j = 0; j < length; j++ ) {
 			solution[i + populationSize].Chromosome.push_back( 0 );
-			if ( randGenerator.uniformInt( 0, 1 ) ) {
+			if ( randGenerator.uniform( 0.0, 1.0 ) > 0.75) {
 				solution[i].Chromosome.push_back( 1 );
 				cost++;
 			} else {
@@ -128,21 +142,37 @@ void selection() {
 	for ( i = 0; i < indexPart.size(); i++ ) {
 		if ( validCount < populationSize ) {
 			validList[validCount++] = indexPart[i];
+			solution[indexPart[i]].age++;
 		} else
 			break;
 	}
+	// prepare indexPart to store first part
+	indexPart.clear();
+	currentNElder = 0;
 	for ( i = 0; i < populationSize; i++ ) {
 		invalidTable[validList[i]] = 1;
+		// elder convergence
+		if ( solution[validList[i]].age >= elderAge && solution[validList[i]].part == 1) {
+			currentNElder++;
+		}
+		if ( solution[validList[i]].part == 1 ) {
+			indexPart.push_back( validList[i] );
+		}
 	}
+	crowdingDisSort();   // rearrange first part by its crowding distance
+	for ( i = 0; i < nElder; i++ ) {
+		storeBest( indexPart[i], i + 1 );
+	}
+
 	j = 0;
 	for ( i = 0; i < 2 * populationSize; i++ ) {
 		if ( !invalidTable[i] ) {
 			invalidList[j++] = i;
+			solution[i].age = 0;
 		}
 		// initialization for next generation
 		solution[i].isChoose = false;
 	}
-	indexPart.clear();
 }
 
 void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
@@ -165,7 +195,6 @@ void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
 			if (!similar)
 				continue;
 			// Swap
-			cout << "Swap!" << endl;
 			vector<bool> temp(
 				parent2.begin() + j * inputNode, 
 				parent2.begin() + (j + 1) * inputNode);
@@ -214,7 +243,7 @@ void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
 void crossover() {
 	int i, j, parent1, parent2, child1, child2;
 	int weight1, weight2, cost1, cost2;
-	static int permutation[populationSize] = {0};
+	int permutation[populationSize] = {0};
 
 	randGenerator.uniformArray( permutation, populationSize, 0, populationSize - 1 );
 	for ( i = 0; i < populationSize / 2; i++ ) {
@@ -278,6 +307,7 @@ void noneDominateSort() {
 			if ( solution[i].isChoose == true ) {
 				if ( solution[i].part == (currentPart - 1) ) {
 					validList[validCount++] = i;
+					solution[i].age++;
 				}
 				continue;
 			}
@@ -305,7 +335,8 @@ void noneDominateSort() {
 		}
 	}
 
-	// prepare indexPart for crowdind distance sort
+	// prepare indexPart for crowding distance sort
+	indexPart.clear();
 	for ( i = 0; i < populationSize * 2; i++ ) {
 		if ( solution[i].isChoose == true && solution[i].part == edgePart ) {
 			indexPart.push_back( i );
@@ -340,8 +371,8 @@ void crowdingDisSort() {
 	//static double pairDistance[populationSize * 2][populationSize * 2] = {0};
 	double *pairDistance;
 	int iTempA, iTempB;
-	double tempA = 999, tempB = 999;
-	double minDis = 999, secondMinDis = 999, tempDis = 0;
+	double tempA = DBL_MAX, tempB = DBL_MAX;
+	double minDis = DBL_MAX, secondMinDis = DBL_MAX, tempDis;
 
 	pairDistance = (double *) malloc( indexPart.size() * indexPart.size() * sizeof( double ) );
 	for ( i = 0; i < indexPart.size() - 1; i++ ) {
@@ -375,7 +406,7 @@ void crowdingDisSort() {
 				iTempB = j;
 			}
 		}
-		crowdingDisPart[i] = pairDistance[i * indexPart.size() + j];
+		crowdingDisPart[indexPart[i]] = pairDistance[i * indexPart.size() + j];
 	}
 	qsort( indexPart.data(), indexPart.size(), sizeof( int ), lessIndirectCrowdingDis );
 	free( pairDistance );
@@ -425,4 +456,40 @@ double getMSE( int indexChromosome, int tid ) {
 	fclose( fp );
 
 	return -MSE;
+}
+
+void storeBest( int indexChromosome, int indexFile ) {
+	FILE *fp1 = fopen( "request_0", "w" ), *fp2;
+	char filename[40];
+	char filename2[40];
+	int i = 0, j = 0, k = 0;
+
+	sprintf( filename, "data/topology_%s_g%d-%d", jobname, curentGeneration, indexFile );
+	sprintf( filename2, "data/topology_%s-%d", jobname, indexFile );
+	fp2 = fopen( filename, "w" );
+	for ( i = 0; i < length; i++ ) {
+		if ( solution[indexChromosome].Chromosome[i]) {
+			j++;
+		}
+	}
+	//printf( "%d\n", j );
+	fprintf( fp2, "%lf\n%d\n", -solution[indexChromosome].x, solution[indexChromosome].y );
+	fprintf( fp1, "%d\n", j );
+	fprintf( fp2, "%d\n", j );
+	for ( i = 0; i < inputNode; i++ ) {
+		for ( j = 0; j < outputNode; j++ ) {
+			if ( solution[indexChromosome].Chromosome[k] == 1 ) {
+				//printf( "%d %d\n", j, i );
+				fprintf( fp1, "%d %d\n", j, i );
+				fprintf( fp2, "%d %d\n", j, i );
+			}
+			k++;
+		}
+	}
+	//printf( "output_I%dO%d-%d", inputNode, outputNode, indexFile );
+	fprintf( fp1, "data/output_%s-%d", jobname, indexFile );
+	fclose( fp1 );
+	fclose( fp2 );
+	system((string("cp ") + filename + " " + filename2).c_str());
+	system( "python python/sparse_autoencoder.pyc 0" );
 }

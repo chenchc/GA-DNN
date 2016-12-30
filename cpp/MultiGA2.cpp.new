@@ -1,0 +1,379 @@
+#include <stdio.h>
+#include <iostream>
+#include <math.h>
+#include <vector>
+#include <time.h>
+#include <algorithm> 
+#include <float.h>
+#include "myrand.h"
+
+using namespace std;
+
+struct sol {
+	double x;   //accuracy
+	int y;   //cost
+	int part;
+	int age;
+	bool isChoose = false;
+	vector<int> Chromosome;
+};
+
+void initial( void );
+void selection( void );
+int noneDominate( const sol &, const sol & );
+void noneDominateSort( void );
+void crowdingDisSort( void );
+void crossover( void );
+double getMSE( int );
+void storeBest( int, int );
+
+const int maxGeneration = 100;
+const int populationSize = 10;
+const int inputNode = 4;
+const int outputNode = 5;
+const int length = inputNode * outputNode;
+const int nElder = 3;
+const int elderAge = 5;
+int edgePart;
+int currentNElder = 0;
+MyRand randGenerator;
+
+vector<sol> solution( populationSize * 2 );
+double crowdingDisPart[populationSize * 2] = {0};
+vector<int> indexPart;
+vector<int> firstList;
+int validList[populationSize] = {0};
+int invalidList[populationSize] = {0};
+int validCount;
+int curentGeneration = 0;
+int main() {
+	int i, j;
+	char name[20] = "mnist.csv";
+	FILE *fp = fopen( "spec", "w" );
+
+	printf( "%s\n%d\n%d\n", name, inputNode, outputNode );
+	fprintf( fp, "%s\n%d\n%d\n", name, inputNode, outputNode );
+	fclose( fp );
+
+	initial();
+	while ( currentNElder < nElder && curentGeneration < maxGeneration ) {
+		crossover();
+		selection();
+		for ( i = 0; i < populationSize; i++ ) {
+			printf( "%d-%.0lf,%d,%d ", solution[validList[i]].part, solution[validList[i]].x, solution[validList[i]].y, solution[validList[i]].age );
+		}
+		curentGeneration++;
+		printf( "\ngenration %d\nnum of first = %d\n\n", curentGeneration, indexPart.size() );
+	}
+
+	fp = fopen( "temp.txt", "w" );
+	fprintf( fp, "X = [" );
+	for ( j = 0; j < populationSize; j++ ) {
+		fprintf( fp, "%d ", (int) solution[validList[j]].x );
+	}
+	fprintf( fp, "];\nY = [" );
+	for ( j = 0; j < populationSize; j++ ) {
+		fprintf( fp, "%d ", solution[validList[j]].y );
+	}
+	fprintf( fp, "];\ni = %d;\nscatter(-X(1:i),Y(1:i),'.');", indexPart.size() );
+	fclose( fp );
+
+	while ( 1 );
+}
+
+void initial( void ) {
+	int i = 0, j, weight = 0, cost = 0;
+
+	for ( i = 0; i <populationSize; i++ ) {
+		solution[i].age = 0;
+		solution[i + populationSize].age = 0;
+		validList[i] = i;
+		invalidList[i] = i + populationSize;
+		for ( j = 0; j < length; j++ ) {
+			solution[i + populationSize].Chromosome.push_back( 0 );
+			if ( randGenerator.uniformInt( 0, 1 ) ) {
+				solution[i].Chromosome.push_back( 1 );
+				weight = weight+1*j;
+				cost++;
+			} else {
+				solution[i].Chromosome.push_back( 0 );
+			}
+
+		}
+		solution[i].x = weight;
+		//solution[i].x = getMSE( i );
+		solution[i].y = cost;
+		weight = 0;
+		cost = 0;
+	}
+}
+
+void selection( void ) {
+	bool invalidTable[2 * populationSize] = {0};
+	int i, j;
+
+	noneDominateSort();
+	crowdingDisSort();
+	for ( i = 0; i < indexPart.size(); i++ ) {
+		if ( validCount < populationSize ) {
+			validList[validCount++] = indexPart[i];
+			solution[indexPart[i]].age++;
+		} else
+			break;
+	}
+	// prepare indexPart to store first part
+	indexPart.clear();
+	currentNElder = 0;
+	for ( i = 0; i < populationSize; i++ ) {
+		invalidTable[validList[i]] = 1;
+		// elder convergence
+		if ( solution[validList[i]].age >= elderAge ) {
+			currentNElder++;
+		}
+		if ( solution[validList[i]].part == 1 ) {
+			indexPart.push_back( validList[i] );
+		}
+	}
+	crowdingDisSort();   // rearrange first part by its crowding distance
+	for ( i = 0; i < nElder; i++ ) {
+		storeBest( indexPart[i], i + 1 );
+	}
+
+	j = 0;
+	for ( i = 0; i < 2 * populationSize; i++ ) {
+		if ( !invalidTable[i] ) {
+			invalidList[j++] = i;
+			solution[i].age = 0;
+		}
+		// initialization for next generation
+		solution[i].isChoose = false;
+	}
+
+}
+
+void crossover( void ) {
+	int i, j, parent1, parent2, child1, child2;
+	int weight1, weight2, cost1, cost2;
+	static int permutation[populationSize] = {0};
+
+	randGenerator.uniformArray( permutation, populationSize, 0, populationSize - 1 );
+	for ( i = 0; i < populationSize / 2; i++ ) {
+		parent1 = validList[permutation[2 * i]];
+		parent2 = validList[permutation[2 * i + 1]];
+		child1 = invalidList[2 * i];
+		child2 = invalidList[2 * i + 1];
+		weight1 = 0;
+		weight2 = 0;
+		cost1 = 0;
+		cost2 = 0;
+		for ( j = 0; j < length; j++ ) {
+			if ( randGenerator.uniformInt( 0, 1 ) ) {
+				solution[child1].Chromosome[j] = solution[parent1].Chromosome[j];
+				solution[child2].Chromosome[j] = solution[parent2].Chromosome[j];
+				if ( solution[parent1].Chromosome[j] == 1 ) {
+					weight1 = weight1 + 1 * j;
+					cost1++;
+				}
+				if ( solution[parent2].Chromosome[j] == 1 ) {
+					weight2 = weight2 + 1 * j;
+					cost2++;
+				}
+			} else {
+				solution[child1].Chromosome[j] = solution[parent2].Chromosome[j];
+				solution[child2].Chromosome[j] = solution[parent1].Chromosome[j];
+				if ( solution[parent2].Chromosome[j] == 1 ) {
+					weight1 = weight1 + 1 * j;
+					cost1++;
+				}
+				if ( solution[parent1].Chromosome[j] == 1 ) {
+					weight2 = weight2 + 1 * j;
+					cost2++;
+				}
+			}
+		}
+		solution[child1].x = weight1;
+		//solution[child1].x = getMSE( child1 );
+		solution[child1].y = cost1;
+		solution[child2].x = weight2;
+		//solution[child2].x = getMSE( child2 );
+		solution[child2].y = cost2;
+	}
+
+}
+
+void noneDominateSort( void ) {
+	int check = 0, currentPart = 1, totalCount = 0;
+	bool isOver = false;
+	int i, j;
+
+	// overshooting nondominate sort
+	validCount = 0;
+	while ( !isOver ) {
+		for ( i = 0; i < populationSize * 2; i++ ) {
+			if ( solution[i].isChoose == true ) {
+				if ( solution[i].part == (currentPart - 1) ) {   // only the previous part will be set valid 
+					validList[validCount++] = i;
+					solution[i].age++;
+				}
+				continue;
+			}
+			check = 0;
+			for ( j = 0; j < populationSize * 2; j++ ) {
+				if ( (solution[j].isChoose == true && solution[j].part < currentPart) || i == j ) {
+					continue;
+				}
+				check = noneDominate( solution[i], solution[j] );
+				if ( check == 1 ) {
+					break;
+				}
+			}
+			if ( check == 0 ) {
+				solution[i].part = currentPart;
+				solution[i].isChoose = true;
+				totalCount++;
+			}
+		}
+		if ( totalCount > populationSize ) {
+			isOver = true;
+			edgePart = currentPart;
+		} else {
+			currentPart++;
+		}
+	}
+
+	// prepare indexPart for crowding distance sort
+	indexPart.clear();
+	for ( i = 0; i < populationSize * 2; i++ ) {
+		if ( solution[i].isChoose == true && solution[i].part == edgePart ) {
+			indexPart.push_back( i );
+		}
+	}
+}
+
+int noneDominate( const sol &a, const sol &b ) {
+	if ( (b.x >= a.x && b.y < a.y) || (b.x > a.x && b.y <= a.y) ) {
+		return 1;
+	}
+	return 0;
+}
+
+int lessIndirectCrowdingDis( const void *a, const void *b ) {
+	double first = crowdingDisPart[*(int *) a];
+	double second = crowdingDisPart[*(int *) b];
+
+	if ( first < second ) {
+		return 1;
+	}
+	else if (first == second) {
+		return 0;
+	}
+	else {
+		return -1;
+	}
+}
+
+void crowdingDisSort( void ) {
+	int i, j;
+	double *pairDistance;
+	int iTempA, iTempB;
+	double tempA = DBL_MAX, tempB = DBL_MAX;
+	double minDis = DBL_MAX, secondMinDis = DBL_MAX, tempDis;
+
+	pairDistance = (double *) malloc( indexPart.size() * indexPart.size() * sizeof( double ) );
+	for ( i = 0; i < indexPart.size() - 1; i++ ) {
+		for ( j = i + 1; j < indexPart.size(); j++ ) {
+			pairDistance[i * indexPart.size() + j] = (solution[indexPart[i]].x - solution[indexPart[j]].x)*(solution[indexPart[i]].x - solution[indexPart[j]].x) + (solution[indexPart[i]].y - solution[indexPart[j]].y)*(solution[indexPart[i]].y - solution[indexPart[j]].y);
+			pairDistance[j * indexPart.size() + i] = pairDistance[i * indexPart.size() + j];
+		}
+	}
+
+	for ( i = 0; i < indexPart.size(); i++ ) {
+		iTempA = -1;
+		minDis = DBL_MAX;
+		secondMinDis = DBL_MAX;
+		for ( j = 0; j < indexPart.size(); j++ ) {
+			if ( i == j )
+				continue;
+			tempDis = pairDistance[i * indexPart.size() + j];
+			if ( tempDis < minDis ) {
+				if ( iTempA == -1 ) {
+					secondMinDis = DBL_MAX;
+					minDis = tempDis;
+					iTempA = j;
+				} else {
+					iTempB = iTempA;
+					secondMinDis = minDis;
+					minDis = tempDis;
+					iTempA = j;
+				}
+			} else if ( tempDis < secondMinDis ) {
+				secondMinDis = tempDis;
+				iTempB = j;
+			}
+		}
+		crowdingDisPart[indexPart[i]] = pairDistance[i * indexPart.size() + j];
+	}
+	qsort( indexPart.data(), indexPart.size(), sizeof( int ), lessIndirectCrowdingDis );
+	free( pairDistance );
+}
+
+double getMSE( int indexChromosome ) {
+	double MSE = 0;
+	FILE *fp = fopen( "request", "w" );
+	int i = 0, j = 0, k = 0;
+
+	for ( i = 0; i < length; i++ ) {
+		if ( solution[indexChromosome].Chromosome[i] == 1 )
+			j++;
+	}
+	//printf( "%d\n", j );
+	fprintf( fp, "%d\n", j );
+	for ( i = 0; i < inputNode; i++ ) {
+		for ( j = 0; j < outputNode; j++ ) {
+			if ( solution[indexChromosome].Chromosome[k] == 1 ) {
+				//printf( "%d %d\n", j, i );
+				fprintf( fp, "%d %d\n", j, i );
+			}
+			k++;
+		}
+	}
+	fclose( fp );
+	system( "python python/sparse_autoencoder.py" );
+	fp = fopen( "reply", "r" );
+	fscanf( fp, "%lf", &MSE );
+	fclose( fp );
+
+	return MSE;
+}
+
+void storeBest( int indexChromosome, int indexFile ) {
+	FILE *fp1 = fopen( "request", "w" ), *fp2;
+	char filename[40];
+	int i = 0, j = 0, k = 0;
+
+	sprintf( filename, "I%dO%dg%d-%d", inputNode, outputNode, curentGeneration, indexFile );
+	fp2 = fopen( filename, "w" );
+	for ( i = 0; i < length; i++ ) {
+		if ( solution[indexChromosome].Chromosome[i] == 1 ) {
+			j++;
+		}
+		fprintf( fp2, "%d", solution[indexChromosome].Chromosome[i] );
+	}
+	//printf( "%d\n", j );
+	fprintf( fp1, "%d\n", j );
+	fprintf( fp2, "\n%lf\n%d\n", solution[indexChromosome].x, solution[indexChromosome].y );
+	for ( i = 0; i < inputNode; i++ ) {
+		for ( j = 0; j < outputNode; j++ ) {
+			if ( solution[indexChromosome].Chromosome[k] == 1 ) {
+				//printf( "%d %d\n", j, i );
+				fprintf( fp1, "%d %d\n", j, i );
+			}
+			k++;
+		}
+	}
+	//printf( "output_I%dO%d-%d", inputNode, outputNode, indexFile );
+	fprintf( fp1, "output_%s", filename );
+	fclose( fp1 );
+	fclose( fp2 );
+	system( "python python/sparse_autoencoder.py" );
+}
