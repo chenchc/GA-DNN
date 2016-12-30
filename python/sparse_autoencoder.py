@@ -3,11 +3,12 @@
 import tensorflow as tf
 import random
 import csv
+import numpy as np
 
 class SparseNN:
 
 	VAL_SPLIT = 0.1
-	BATCH_SIZE = 32
+	BATCH_SIZE = 128
 
 	INPUT_WIDTH = 2
 	MAX_HIDDEN_WIDTH = 1
@@ -40,7 +41,7 @@ class SparseNN:
 				self.FULL_CONN_EDGES_ENCODER.append([j, i])
 				self.FULL_CONN_EDGES_DECODER.append([i, j])
 
-		self.sess = tf.InteractiveSession()
+		self.sess = tf.Session(config=tf.ConfigProto(intra_op_parallelism_threads=8))
 	
 	@staticmethod
 	def __weight_variable(shape, edges):
@@ -78,30 +79,27 @@ class SparseNN:
 		label_trans = tf.transpose(self.label)
 
 		self.loss = tf.reduce_mean(tf.reduce_mean(tf.square(self.output - label_trans), axis=0))
-		self.train_step = tf.train.AdamOptimizer().minimize(self.loss)
+		self.train_step = tf.train.AdamOptimizer(0.1).minimize(self.loss)
 
 		self.sess.run(tf.global_variables_initializer())
 
 	def define_data(self, input_data):
 		split = int(len(input_data) * self.VAL_SPLIT)
-		self.val_input = input_data[0: split]
-		self.train_input = input_data[split: ]
+		self.val_input = np.array(input_data[0: split])
+		self.train_input = np.array(input_data[split: ])
 
 	def __shuffle_train_data(self):
-		index = range(len(self.train_input))
-		random.shuffle(index)
-		new_train_input = []
-		for i in range(len(index)):
-			new_train_input.append(self.train_input[i])
-		self.train_input = new_train_input
+		self.train_input = self.train_input[np.random.permutation(self.train_input.shape[0]), :]
 
 	def train(self):
 		self.mse = 999999999.9
 		for iter in range(10000):
-			for i in range(0, len(self.train_input) - self.BATCH_SIZE, self.BATCH_SIZE):
-				self.train_step.run(
-					feed_dict={self.input: self.train_input[i: i + self.BATCH_SIZE]})
-			newMse = self.loss.eval(feed_dict={self.input: self.val_input})
+			for i in range(0, self.train_input.shape[0] - self.BATCH_SIZE, self.BATCH_SIZE):
+				self.sess.run(
+					self.train_step,
+					feed_dict={self.input: self.train_input[[i, i + self.BATCH_SIZE], :]})
+			with self.sess.as_default():
+				newMse = self.loss.eval(feed_dict={self.input: self.val_input})
 			print newMse
 			if newMse >= self.mse:
 				break
@@ -113,38 +111,46 @@ class SparseNN:
 		return self.mse
 
 	def getCode(self):
-		code = self.encoder.run(feed_dict={self.input: self.train_input})
-		return code.tolist()
+		with self.sess.as_default():
+			code = self.encoder.eval(feed_dict={self.input: self.train_input})
+		return np.transpose(code).tolist()
 
 if __name__ == '__main__':
 
 	## Read request
 
-	file = open('request', 'r')
+	file = open('spec', 'r')
 	parameters = file.read().split('\n')
 	data_filename = parameters[0]
 	input_width = int(parameters[1])
 	hidden_width = int(parameters[2])
-	edge_count = int(parameters[3])
+
+	file = open('request', 'r')
+	parameters = file.read().split('\n')
+	edge_count = int(parameters[0])
 	edges = []
 	for i in range(edge_count):
-		edge = [int(intStr) for intStr in parameters[4 + i].split(' ')]
+		edge = [int(intStr) for intStr in parameters[1 + i].split(' ')]
 		edges.append(edge)
-	
-	saveOrNot = (parameters[4 + edge_count] == '1')
+
+		
+	saveOrNot = (parameters[1 + edge_count] != '')
 	if saveOrNot:
-		outputFilename = parameters[5 + edge_count]
+		outputFilename = parameters[1 + edge_count]
 
 	## Read input data
 	inputDataFile = open(data_filename, 'rb')
 	inputData = []
-	csvReader = csv.reader(inputDataFile, delimiter=' ')
+	csvReader = csv.reader(inputDataFile, delimiter=',')
 	for row in csvReader:
 		inputData.append(row)
 
 	## Build model
 	sparse_nn = SparseNN(input_width, max_hidden_width=hidden_width)
-	sparse_nn.define_model(edges)
+	if edge_count == 0:
+		sparse_nn.define_model()
+	else:
+		sparse_nn.define_model(edges)
 	sparse_nn.define_data(inputData)
 	sparse_nn.train()
 
@@ -155,8 +161,10 @@ if __name__ == '__main__':
 	## Output data
 	if saveOrNot:
 		code = sparse_nn.getCode()
-		csvWriter = csv.writer(outputFilename, 'wb')
-		csvWriter.write(code)
+		outputFile = open(outputFilename, 'wb')
+		csvWriter = csv.writer(outputFile, delimiter=',')
+		for instance in code:
+			csvWriter.writerow(instance)
 	
 '''
 if __name__ == '__main__':
