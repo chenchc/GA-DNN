@@ -7,6 +7,7 @@
 #include <cfloat>
 #include "myrand.h"
 #include <functional>
+#include <omp.h>
 
 using namespace std;
 
@@ -26,7 +27,7 @@ void noneDominateSort();
 void crowdingDisSort();
 void crossover();
 bool converge();
-double getMSE( int );
+double getMSE( int, int );
 
 const int generation = 10;
 const int populationSize = 10;
@@ -75,6 +76,7 @@ int main() {
 		//converge();
 	}
 
+	/*
 	fp = fopen( "temp.txt", "w" );
 	fprintf( fp, "X = [" );
 	for ( j = 0; j < populationSize; j++ ) {
@@ -88,6 +90,7 @@ int main() {
 	fclose( fp );
 
 	while ( 1 );
+	*/
 }
 void initial() {
 	int i = 0, j, weight = 0, cost = 0;
@@ -105,9 +108,13 @@ void initial() {
 			}
 
 		}
-		solution[i].x = getMSE(i);
 		solution[i].y = cost;
 		cost = 0;
+	}
+	#pragma omp parallel for
+	for (i = 0; i < populationSize; i++) {
+		int tid = omp_get_thread_num();
+		solution[i].x = getMSE(i, tid);
 	}
 }
 
@@ -220,7 +227,7 @@ void crossover() {
 		cost1 = 0;
 		cost2 = 0;
 
-		//polymorphismModify(solution[parent1].Chromosome, solution[parent2].Chromosome);
+		polymorphismModify(solution[parent1].Chromosome, solution[parent2].Chromosome);
 
 		for ( j = 0; j < length; j++ ) {
 			if ( randGenerator.uniformInt( 0, 1 ) ) {
@@ -247,14 +254,16 @@ void crossover() {
 				}
 			}
 		}
-		//solution[child1].x = weight1;
-		solution[child1].x = getMSE( child1 );
 		solution[child1].y = cost1;
-		//solution[child2].x = weight2;
-		solution[child2].x = getMSE( child2 );
 		solution[child2].y = cost2;
 	}
 
+	// Parallelly call DNN to get MSE
+	#pragma omp parallel for
+	for (i = 0; i < populationSize; i++) {
+		int tid = omp_get_thread_num();
+		solution[invalidList[i]].x = getMSE(invalidList[i], tid);
+	}
 }
 
 void noneDominateSort() {
@@ -387,9 +396,9 @@ bool converge() {
 	return 1;
 }
 
-double getMSE( int indexChromosome ) {
+double getMSE( int indexChromosome, int tid ) {
 	double MSE = 0;
-	FILE *fp = fopen( "request", "w" );
+	FILE *fp = fopen( (string("request_") + to_string(tid)).c_str(), "w" );
 	int i = 0, j = 0, k = 0;
 
 	for ( i = 0; i < length; i++ ) {
@@ -408,8 +417,10 @@ double getMSE( int indexChromosome ) {
 		}
 	}
 	fclose( fp );
-	int status = system( "python python/sparse_autoencoder.pyc" );
-	fp = fopen( "reply", "r" );
+	int status = system( (string("python python/sparse_autoencoder.pyc ") + to_string(tid)).c_str() );
+	if (status != 0)
+		exit(status);
+	fp = fopen( (string("reply_") + to_string(tid)).c_str(), "r" );
 	fscanf( fp, "%lf", &MSE );
 	fclose( fp );
 

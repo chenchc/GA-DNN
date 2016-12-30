@@ -4,11 +4,13 @@ import tensorflow as tf
 import random
 import csv
 import numpy as np
+import sys
 
 class SparseNN:
 
 	VAL_SPLIT = 0.1
 	BATCH_SIZE = 128
+	LEARNING_RATE = 0.1
 
 	INPUT_WIDTH = 2
 	MAX_HIDDEN_WIDTH = 1
@@ -79,7 +81,7 @@ class SparseNN:
 		label_trans = tf.transpose(self.label)
 
 		self.loss = tf.reduce_mean(tf.reduce_mean(tf.square(self.output - label_trans), axis=0))
-		self.train_step = tf.train.AdamOptimizer(0.1).minimize(self.loss)
+		self.train_step = tf.train.AdamOptimizer(self.LEARNING_RATE).minimize(self.loss)
 
 		self.sess.run(tf.global_variables_initializer())
 
@@ -115,17 +117,22 @@ class SparseNN:
 			code = self.encoder.eval(feed_dict={self.input: self.train_input})
 		return np.transpose(code).tolist()
 
+	def setLearningRate(self, lr):
+		self.LEARNING_RATE = lr
+
 if __name__ == '__main__':
 
-	## Read request
+	## Read args
+	main_tid = sys.argv[1]
 
+	## Read request
 	file = open('spec', 'r')
 	parameters = file.read().split('\n')
 	data_filename = parameters[0]
 	input_width = int(parameters[1])
 	hidden_width = int(parameters[2])
 
-	file = open('request', 'r')
+	file = open('request_' + str(main_tid), 'r')
 	parameters = file.read().split('\n')
 	edge_count = int(parameters[0])
 	edges = []
@@ -152,10 +159,12 @@ if __name__ == '__main__':
 	else:
 		sparse_nn.define_model(edges)
 	sparse_nn.define_data(inputData)
+	if saveOrNot:
+		sparse_nn.setLearningRate(0.001)
 	sparse_nn.train()
 
 	## Output MSE
-	replyFile = open('reply', 'w')
+	replyFile = open('reply_' + str(main_tid), 'w')
 	replyFile.write(str(sparse_nn.getMse()))
 
 	## Output data
