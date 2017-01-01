@@ -1,7 +1,10 @@
 all: MultiGA2 shrink python/sparse_autoencoder.pyc
 
-#mnist.csv: python/preprocess.pyc train.csv
-#	python $<
+mnist.csv: python/preprocess.pyc train.csv
+	python $<
+
+mnist_label.csv: python/preprocess.pyc train.csv
+	python $<
 
 obj/%.o: cpp/%.cpp 
 	g++ -std=c++11 -O3 -march=native -c -o $@ $< -fopenmp -lpthread
@@ -19,6 +22,9 @@ python/%.pyc: python/%.py
 run: all
 	./run.sh
 
+run_final: python/sparse_nn.pyc mnist.csv mnist_label.csv
+	python $<
+
 clean:
 	rm -f obj/*
 	rm -f MultiGA2
@@ -27,4 +33,4 @@ clean:
 	rm -f reply*
 	rm -f spec
 
-.PHONY: clean run all
+.PHONY: clean run

@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
 	inputNode = atoi(argv[1]);
 	outputNode = atoi(argv[2]);
 	length = inputNode * outputNode;
-	populationSize = (int)(length * log(length) / 64) / 2 * 2;
+	populationSize = (int)(length * log(length) / 16) / 2 * 2;
 	jobname = argv[3];
 	trainDataFilename = argv[4];
 	crowdingDisPart = new double[populationSize * 2]{0.0};
@@ -175,9 +175,7 @@ void selection() {
 	}
 }
 
-void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
-	const int sampleCount = inputNode / 5;
-
+void polymorphismModifySimilar(vector<bool> &parent1, vector<bool> &parent2, int sampleCount) {
 	for (int i = 0; i < outputNode; i++) {
 		for (int j = 0; j < outputNode; j++) {
 			if (i == j)
@@ -206,8 +204,7 @@ void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
 	}
 }
 
-/*
-void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
+void polymorphismModifyIdentical(vector<bool> &parent1, vector<bool> &parent2) {
 	vector<size_t> hashOfHiddenParent1;
 	vector<size_t> hashOfHiddenParent2;
 	hash<vector<bool> > hash_edge;
@@ -226,7 +223,6 @@ void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
 			if (i == j)
 				continue;
 			if (hashValueParent1 == hashValueParent2) {
-				cout << "Swap!" << endl;
 				vector<bool> temp(
 					parent2.begin() + j * inputNode, 
 					parent2.begin() + (j + 1) * inputNode);
@@ -238,7 +234,6 @@ void polymorphismModify(vector<bool> &parent1, vector<bool> &parent2) {
 		}
 	}
 }
-*/
 
 void crossover() {
 	int i, j, parent1, parent2, child1, child2;
@@ -256,7 +251,9 @@ void crossover() {
 		cost1 = 0;
 		cost2 = 0;
 
-		polymorphismModify(solution[parent1].Chromosome, solution[parent2].Chromosome);
+		polymorphismModifySimilar(solution[parent1].Chromosome, solution[parent2].Chromosome, inputNode / 4);
+		polymorphismModifySimilar(solution[parent1].Chromosome, solution[parent2].Chromosome, inputNode / 2);
+		polymorphismModifyIdentical(solution[parent1].Chromosome, solution[parent2].Chromosome);
 
 		for ( j = 0; j < length; j++ ) {
 			if ( randGenerator.uniformInt( 0, 1 ) ) {
@@ -438,11 +435,11 @@ double getMSE( int indexChromosome, int tid ) {
 	}
 	//printf( "%d\n", j );
 	fprintf( fp, "%d\n", j );
-	for ( i = 0; i < inputNode; i++ ) {
-		for ( j = 0; j < outputNode; j++ ) {
+	for ( i = 0; i < outputNode; i++ ) {
+		for ( j = 0; j < inputNode; j++ ) {
 			if ( solution[indexChromosome].Chromosome[k] == 1 ) {
 				//printf( "%d %d\n", j, i );
-				fprintf( fp, "%d %d\n", j, i );
+				fprintf( fp, "%d %d\n", i, j );
 			}
 			k++;
 		}
@@ -476,12 +473,12 @@ void storeBest( int indexChromosome, int indexFile ) {
 	fprintf( fp2, "%lf\n%d\n", -solution[indexChromosome].x, solution[indexChromosome].y );
 	fprintf( fp1, "%d\n", j );
 	fprintf( fp2, "%d\n", j );
-	for ( i = 0; i < inputNode; i++ ) {
-		for ( j = 0; j < outputNode; j++ ) {
+	for ( i = 0; i < outputNode; i++ ) {
+		for ( j = 0; j < inputNode; j++ ) {
 			if ( solution[indexChromosome].Chromosome[k] == 1 ) {
 				//printf( "%d %d\n", j, i );
-				fprintf( fp1, "%d %d\n", j, i );
-				fprintf( fp2, "%d %d\n", j, i );
+				fprintf( fp1, "%d %d\n", i, j );
+				fprintf( fp2, "%d %d\n", i, j );
 			}
 			k++;
 		}
